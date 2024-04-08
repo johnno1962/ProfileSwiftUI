@@ -13,15 +13,18 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/johnno1962/SwiftTrace",
-                 .upToNextMinor(from: "8.5.0")),
+                 .upToNextMinor(from: "8.5.3")),
         .package(url: "https://github.com/johnno1962/SwiftRegex5",
                  .upToNextMinor(from: "6.0.1")),
+        .package(url: "https://github.com/johnno1962/DLKit",
+                 .upToNextMinor(from: "3.3.1")),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .target(
-            name: "ProfileSwiftUI", dependencies: ["SwiftTrace",
+            name: "ProfileSwiftUI", dependencies: ["SwiftTrace", 
+                .product(name: "DLKitC", package: "DLKit"),
                .product(name: "SwiftRegex", package: "SwiftRegex5")]),
     ]
 )
