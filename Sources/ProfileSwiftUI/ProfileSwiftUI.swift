@@ -14,98 +14,105 @@ import DLKitC
 
 public struct ProfileSwiftUI {
     
-    /** framework to intercept */
+    /** framework to intercept  calls to*/
     public static var packageFilter = "/SwiftUI.framework/"
-    /** image number of framework to intercept */
+    /** image number of framework to intercept calls to */
     public static var targetImageNumber: UInt32 = 0
     /** Caller information extractor */
     public static var relevantRegex = #"( closure #\d+|in \S+ : some|AG\w+)"#
-    /** methods to include */
+    /** Regex pattern for methods to add profiling aspect */
     public static var inclusions = NSRegularExpression(regexp:
         #"^AG| -> |body\.getter"#)
-    /** demangled symbols to avoid */
+    /** demangled symbol names to avoid */
     public static var exclusions = NSRegularExpression(regexp:
         #"descriptor|default argument|infix|subscript|-> (some|SwiftUI\.(Text|Font))|AGAttributeNil|callerTotals\.modify"#)
-    /* detail for end of symbol */
-    public static var detailFormat = " 0x%llx%s"
-    
-    /** symbols to remap into package */
-    public static var diversions = [
-        "$s7SwiftUI15DynamicPropertyPAAE6updateyyF":
-            "$s7SwiftUI15DynamicPropertyP07ProfileaB0E8__updateyyF"
-    ]
+
+    /** format for function summary entries */
+    public static var entryFormat = "%10@\t🍿%@ 0x%llx"
+    /** format for detail/caller entries */
+    public static var detailFormat = "  ↳ %@\t%@"
+    /** suffix for end of caller symbol */
+    public static var suffixFormat = " 0x%llx%s"
+    /** formats for displaying elapsed times/counts */
+    public static var timeFormat = "%.3fms/%d"
     
     @discardableResult
     static func setTarget(framework: String) -> UInt32 {
         packageFilter = "/\(framework).framework/"
-        targetImageNumber = (0..<_dyld_image_count()).first(where: {
+        targetImageNumber = (UInt32(0)..<_dyld_image_count()).first(where: {
             strstr(_dyld_get_image_name($0), packageFilter) != nil })!
         return targetImageNumber
     }
     
-    public static func profile(interval: TimeInterval = 10, top: Int = 10,
-                               methodPattern: String = #"\.getter"#) {
+    static var tracer: STTracer = { existing, symname in
+        var info = Dl_info()
+        // Is the destinaton of the binding in the target image?
+        guard existing >= autoBitCast(_dyld_get_image_header(ProfileSwiftUI.targetImageNumber)) &&
+                ProfileSwiftUI.targetImageNumber+1 < _dyld_image_count() &&
+                existing < autoBitCast(_dyld_get_image_header(ProfileSwiftUI.targetImageNumber+1)) ||
+                trie_dladdr(existing, &info) != 0 && strstr(info.dli_fname,
+                    ProfileSwiftUI.packageFilter) != nil else { return existing }
+        let demangled = SwiftMeta.demangle(symbol: symname) ?? String(cString: symname)+"()"
+        guard ProfileSwiftUI.inclusions.matches(demangled),
+              !ProfileSwiftUI.exclusions.matches(demangled) else {
+            return existing
+        }
+        // Construct logger aspect
+        let tracer: UnsafeMutableRawPointer = autoBitCast(SwiftTrace.Profile(name: demangled,
+                      original: autoBitCast(existing))?.forwardingImplementation)
+        // Continue logging after "injections"
+        SwiftTrace.initialRebindings.append(rebinding(name: symname,
+                                              replacement: tracer, replaced: nil))
+        return tracer
+    }
+    
+    /// ProfileSwiftUI.profile() - log statistics on SwuiftUI log jams
+    /// - Parameters:
+    ///   - interval: Interval between sumping stats. nil == manual polling.
+    ///   - top: # of functions to print stats for,
+    ///   - detail: # number of callers to break down sstats for.
+    ///   - reset: Whether to reset statistics between polls.
+    ///   - methodPattern: Additional app methods to incldue stats for.
+    ///   - traceFilter: Regex pattern for functions to log. Pass #"^(?!AG)"# to filter out AG
+    public static func profile(interval: TimeInterval? = 10, top: Int = 10,
+                               detail: Int = 5, reset: Bool = true,
+                               methodPattern: String = #"\.getter"#,
+                               traceFilter: String? = nil) {
         SwiftTrace.startNewTrace(subLevels: 0)
-        #if false
-        var diversions = [rebinding]()
-        for (from, to) in Self.diversions {
-            guard let replacement = dlsym(SwiftMeta.RTLD_SELF, to) else { continue }
-//            print(from, to)
-            diversions.append(rebinding(name: strdup(from),
-                replacement: replacement, replaced: nil))
+        // Filter out messages?
+        if let filter = traceFilter {
+            SwiftTrace.traceFilterInclude = filter
         }
-//        _ = SwiftTrace.apply(rebindings: &diversions)
-//        SwiftTrace.initialRebindings += diversions
-        #endif
+        // Includ elogging on all app methods matching pattern
         _ = SwiftTrace.interpose(aBundle: searchBundleImages(), methodName: methodPattern)
-        let tracer: STTracer = { existing, symname in
-            var info = Dl_info()
-            guard existing >= _dyld_get_image_header(ProfileSwiftUI.targetImageNumber) &&
-                    ProfileSwiftUI.targetImageNumber+1 < _dyld_image_count() &&
-                    existing < _dyld_get_image_header(ProfileSwiftUI.targetImageNumber+1) ||
-                    trie_dladdr(existing, &info) != 0 && strstr(info.dli_fname,
-                        ProfileSwiftUI.packageFilter) != nil else { return existing }
-            let demangled = SwiftMeta.demangle(symbol: symname) ?? String(cString: symname)+"()"
-//            if demangled.contains("") || true {
-//                print(String(cString: framework), demangled)
-//            }
-//            print("|"+demangled, terminator: "")
-//            print(demangled)
-            guard Self.diversions.index(forKey: String(cString: symname)) == nil,
-                  ProfileSwiftUI.inclusions.matches(demangled),
-                  !ProfileSwiftUI.exclusions.matches(demangled) else {
-                return existing
-            }
-            let tracer: UnsafeMutableRawPointer = autoBitCast(SwiftTrace.Profile(name: demangled,
-                          original: autoBitCast(existing))?.forwardingImplementation)
-            SwiftTrace.initialRebindings.append(rebinding(name: symname,
-                                                  replacement: tracer, replaced: nil))
-            return tracer
-        }
         
+        // Log all calls from App into SwiftUI
         let swiftUIImage = setTarget(framework: "SwiftUI")
         appBundleImages { path, header, slide in
             rebind_symbols_trace(autoBitCast(header), slide, tracer)
         }
+        // Log all calls from SwiftUI into the AttributeGraph framework
         setTarget(framework: "AttributeGraph")
         rebind_symbols_trace(autoBitCast(_dyld_get_image_header(swiftUIImage)),
                              _dyld_get_image_vmaddr_slide(swiftUIImage),
                              tracer)
-        _ = SwiftMeta.structsPassedByReference
-        pollStats(interval: interval, top: top)
+        _ = SwiftMeta.structsPassedByReference // perform ahead of time.
+        // Start polling
+        if interval != nil {
+            pollStats(interval: interval, top: top, detail: detail, reset: reset)
+        }
     }
     
-    public static func pollStats(interval: TimeInterval = 10, top: Int = 10,
+    public static func pollStats(interval: TimeInterval? = 10, top: Int = 10,
                                  detail: Int = 5, reset: Bool = true) {
-        DispatchQueue.main.asyncAfter(deadline: .now()+interval) {
+        DispatchQueue.main.asyncAfter(deadline: .now()+(interval ?? 0)) {
             print("\n⏳Profiles\n===========")
-            for (swizzle, elapsed, callerTotals) in SwiftTrace
+            func usecFormat(_ elapsed: TimeInterval, _ count: Int) -> String {
+                return String(format: timeFormat, elapsed * 1000.0, count)
+            }
+            for (swizzle, elapsed, callerTotals, callerCounts) in SwiftTrace
                 .sortedSwizzles(onlyFirst: top, reset: reset) {
-                print(String(format: "%.3fms\t🍿%@ 0x%llx",
-                             elapsed*1000, swizzle.signature,
-                             swizzle.implementation))
-                guard let callerTotals else { continue }
-                var totals = [String: Double]()
+                var total = 0, totals = [String: Double](), counts = [String: Int]()
                 var info = Dl_info()
                 for (caller, t) in callerTotals
                     .sorted(by: { $0.value > $1.value } ) {
@@ -118,19 +125,27 @@ public struct ProfileSwiftUI {
                     } else {
                         relevant = [callerDecl]
                     }
-                    totals[relevant.joined() +
-                           String(format: detailFormat, uintptr_t(bitPattern: info.dli_saddr),
-                                  strrchr(info.dli_fname, Int32(UInt8(ascii: "/")))),
-                           default: 0] += t
+                    let key = relevant.joined() +
+                        String(format: suffixFormat, uintptr_t(bitPattern: info.dli_saddr),
+                               strrchr(info.dli_fname, Int32(UInt8(ascii: "/"))))
+                    totals[key, default: 0] += t
+                    let count = callerCounts[caller] ?? 0
+                    counts[key, default: 0] += count
+                    total += count
                 }
 
+                print(String(format: entryFormat, usecFormat(elapsed, total),
+                             swizzle.signature, swizzle.implementation))
                 for (relevant, t) in totals
                     .sorted(by: { $0.value > $1.value } ).prefix(detail) {
-                    print(String(format: "  ↳ %.3f\t%@",
-                                 t*1000, relevant))
+                    print(String(format: detailFormat,
+                                 usecFormat(t, counts[relevant] ?? 0), relevant))
                 }
             }
-            pollStats(interval: interval, top: top, detail: detail)
+            
+            if interval != nil {
+                pollStats(interval: interval, top: top, detail: detail, reset: reset)
+            }
         }
     }
 }
@@ -140,16 +155,19 @@ extension SwiftTrace {
     /**
      Sorted descending accumulated amount of time spent in each swizzled method.
      */
-    public static func sortedSwizzles(onlyFirst: Int? = nil, reset: Bool)
-        -> [(Swizzle, TimeInterval, [UnsafeRawPointer: TimeInterval]?)] {
+    public static func sortedSwizzles(onlyFirst: Int? = nil, reset: Bool) -> [(Swizzle,
+        TimeInterval, [UnsafeRawPointer: TimeInterval], [UnsafeRawPointer: Int])] {
         let sorted = lastSwiftTrace.activeSwizzles.map { $0.value }
             .sorted { $0.totalElapsed > $1.totalElapsed }
         let out = (onlyFirst != nil ? Array(sorted.prefix(onlyFirst!)) : sorted)
-                .map { ($0, $0.totalElapsed, ($0 as? Profile)?.callerTotals) }
+            .compactMap { $0 as? Profile }.map {
+                return ($0, $0.totalElapsed, $0.callerTotals, $0.callerCounts) }
         if reset {
             for swizzle in sorted {
                 swizzle.totalElapsed = 0
-                (swizzle as? Profile)?.callerTotals.removeAll()
+                guard let profile = swizzle as? Profile else { continue }
+                profile.callerTotals.removeAll()
+                profile.callerCounts.removeAll()
             }
         }
         return out
@@ -157,50 +175,15 @@ extension SwiftTrace {
     
     open class Profile: Decorated {
         
+        open var callerCounts = [UnsafeRawPointer: Int]()
         open var callerTotals = [UnsafeRawPointer: TimeInterval]()
         
         open override func onExit(stack: inout ExitStack,
                                   invocation: Swizzle.Invocation) {
             callerTotals[invocation.returnAddress, default: 0] += invocation.elapsed
+            callerCounts[invocation.returnAddress, default: 0] += 1
             super.onExit(stack: &stack, invocation: invocation)
         }
     }
 }
-
-#if false
-import SwiftUI
-
-@available(macOS 10.15, iOS 13.0, *)
-extension SwiftUI.DynamicProperty {
-    public mutating func __update() {
-        print("HERE")
-        self.update()
-    }
-}
-
-@available(macOS 10.15, iOS 13.0, *)
-extension SwiftUI.LocalizedStringKey {
-    public init(__stringLiteral: String) {
-        self.init(stringLiteral: __stringLiteral)
-    }
-}
-
-@available(macOS 10.15, iOS 13.0, *)
-extension SwiftUI.ViewBuilder {
-    public static func __buildExpression<A: SwiftUI.View>(_ a: A) -> A {
-        return buildExpression(a)
-    }
-    public static func __buildBlock<A: SwiftUI.View>(_ a: A) -> A {
-        return buildBlock(a)
-    }
-}
-#endif
-
-//@available(iOS 16.0, *)
-//extension SwiftUI.Text {
-//    init<A>(alignment: TextAlignment, spacing: ViewSpacing, content: () -> A) -> VStack<A> {
-//        self.init(alignment: TextAlignment, spacing: ViewSpacing, content: content)
-//    }
-//}
-
 #endif
