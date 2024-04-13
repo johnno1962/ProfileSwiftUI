@@ -134,6 +134,9 @@ public struct ProfileSwiftUI {
                     total += count
                 }
 
+                #if swift(>=5.10)
+                totals = totals // Needed for Xcode 15.3!
+                #endif
                 print(String(format: entryFormat, usecFormat(elapsed, total),
                              swizzle.signature, swizzle.implementation))
                 for (relevant, t) in totals
@@ -147,6 +150,13 @@ public struct ProfileSwiftUI {
                 pollStats(interval: interval, top: top, detail: detail, reset: reset)
             }
         }
+    }
+}
+
+extension Dl_info: CustomDebugStringConvertible {
+    public var debugDescription: String {
+        String(format: "0x%llx %@", uintptr_t(bitPattern: dli_saddr),
+               SwiftMeta.demangle(symbol: dli_sname) ?? String(cString: dli_sname))
     }
 }
 
