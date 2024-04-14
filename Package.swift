@@ -18,7 +18,7 @@ let package = Package(
         .package(url: "https://github.com/johnno1962/SwiftRegex5",
                  .upToNextMinor(from: "6.1.0")),
         .package(url: "https://github.com/johnno1962/DLKit",
-                 .upToNextMinor(from: "3.3.3")),
+                 .upToNextMinor(from: "3.3.4")),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.

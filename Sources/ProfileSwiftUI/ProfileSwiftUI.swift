@@ -38,10 +38,11 @@ public struct ProfileSwiftUI {
     public static var timeFormat = "%.3fms/%d"
     
     @discardableResult
-    static func setTarget(framework: String) -> UInt32 {
+    static func setTarget(framework: String) -> UInt32? {
         packageFilter = "/\(framework).framework/"
-        targetImageNumber = (UInt32(0)..<_dyld_image_count()).first(where: {
-            strstr(_dyld_get_image_name($0), packageFilter) != nil })!
+        guard let imageNumber = (UInt32(0)..<_dyld_image_count()).first(where: {
+            strstr(_dyld_get_image_name($0), packageFilter) != nil }) else { return nil }
+        targetImageNumber = imageNumber
         return targetImageNumber
     }
     
@@ -87,13 +88,16 @@ public struct ProfileSwiftUI {
         // Includ elogging on all app methods matching pattern
         _ = SwiftTrace.interpose(aBundle: searchBundleImages(), methodName: methodPattern)
         
-        print("⏳ Logging all calls from App into SwiftUI")
-        let swiftUIImage = setTarget(framework: "SwiftUI")
+        guard let swiftUIImage = setTarget(framework: "SwiftUI") else {
+            print("⏳ SwiftUI not in use.")
+            return
+        }
+        print("⏳ Logging all calls from App into SwiftUI.")
         appBundleImages { path, header, slide in
             rebind_symbols_trace(autoBitCast(header), slide, tracer)
         }
         
-        print("⏳ Loging all calls from SwiftUI into the AttributeGraph framework")
+        print("⏳ Logging all calls from SwiftUI into the AttributeGraph framework.")
         setTarget(framework: "AttributeGraph")
         rebind_symbols_trace(autoBitCast(_dyld_get_image_header(swiftUIImage)),
                              _dyld_get_image_vmaddr_slide(swiftUIImage),
