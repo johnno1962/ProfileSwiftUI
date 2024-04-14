@@ -7,10 +7,11 @@
 
 #if canImport(Darwin) // Apple platforms only..
 import Foundation
-import SwiftRegex
-@_exported 
 import SwiftTrace
+#if SWIFT_PACKAGE
+import SwiftRegex
 import DLKitC
+#endif
 
 public struct ProfileSwiftUI {
     
@@ -58,7 +59,7 @@ public struct ProfileSwiftUI {
             return existing
         }
         // Construct logger aspect
-        let tracer: UnsafeMutableRawPointer = autoBitCast(SwiftTrace.Profile(name: demangled,
+        let tracer: UnsafeMutableRawPointer = autoBitCast(Profile(name: demangled,
                       original: autoBitCast(existing))?.forwardingImplementation)
         // Continue logging after "injections"
         SwiftTrace.initialRebindings.append(rebinding(name: symname,
@@ -86,16 +87,18 @@ public struct ProfileSwiftUI {
         // Includ elogging on all app methods matching pattern
         _ = SwiftTrace.interpose(aBundle: searchBundleImages(), methodName: methodPattern)
         
-        // Log all calls from App into SwiftUI
+        print("⏳ Logging all calls from App into SwiftUI")
         let swiftUIImage = setTarget(framework: "SwiftUI")
         appBundleImages { path, header, slide in
             rebind_symbols_trace(autoBitCast(header), slide, tracer)
         }
-        // Log all calls from SwiftUI into the AttributeGraph framework
+        
+        print("⏳ Loging all calls from SwiftUI into the AttributeGraph framework")
         setTarget(framework: "AttributeGraph")
         rebind_symbols_trace(autoBitCast(_dyld_get_image_header(swiftUIImage)),
                              _dyld_get_image_vmaddr_slide(swiftUIImage),
                              tracer)
+        
         _ = SwiftMeta.structsPassedByReference // perform ahead of time.
         // Start polling
         if interval != nil {
@@ -110,8 +113,8 @@ public struct ProfileSwiftUI {
             func usecFormat(_ elapsed: TimeInterval, _ count: Int) -> String {
                 return String(format: timeFormat, elapsed * 1000.0, count)
             }
-            for (swizzle, elapsed, callerTotals, callerCounts) in SwiftTrace
-                .sortedSwizzles(onlyFirst: top, reset: reset) {
+            for (swizzle, elapsed, callerTotals, callerCounts)
+                    in sortedSwizzles(onlyFirst: top, reset: reset) {
                 var total = 0, totals = [String: Double](), counts = [String: Int]()
                 var info = Dl_info()
                 for (caller, t) in callerTotals
@@ -151,23 +154,14 @@ public struct ProfileSwiftUI {
             }
         }
     }
-}
 
-extension Dl_info: CustomDebugStringConvertible {
-    public var debugDescription: String {
-        String(format: "0x%llx %@", uintptr_t(bitPattern: dli_saddr),
-               SwiftMeta.demangle(symbol: dli_sname) ?? String(cString: dli_sname))
-    }
-}
-
-extension SwiftTrace {
-    
     /**
      Sorted descending accumulated amount of time spent in each swizzled method.
      */
-    public static func sortedSwizzles(onlyFirst: Int? = nil, reset: Bool) -> [(Swizzle,
-        TimeInterval, [UnsafeRawPointer: TimeInterval], [UnsafeRawPointer: Int])] {
-        let sorted = lastSwiftTrace.activeSwizzles.map { $0.value }
+    public static func sortedSwizzles(onlyFirst: Int? = nil, reset: Bool) ->
+        [(SwiftTrace.Swizzle, TimeInterval,
+          [UnsafeRawPointer: TimeInterval], [UnsafeRawPointer: Int])] {
+        let sorted = SwiftTrace.lastSwiftTrace.activeSwizzles.map { $0.value }
             .sorted { $0.totalElapsed > $1.totalElapsed }
         let out = (onlyFirst != nil ? Array(sorted.prefix(onlyFirst!)) : sorted)
             .compactMap { $0 as? Profile }.map {
@@ -183,17 +177,24 @@ extension SwiftTrace {
         return out
     }
     
-    open class Profile: Decorated {
+    open class Profile: SwiftTrace.Decorated {
         
         open var callerCounts = [UnsafeRawPointer: Int]()
         open var callerTotals = [UnsafeRawPointer: TimeInterval]()
         
-        open override func onExit(stack: inout ExitStack,
-                                  invocation: Swizzle.Invocation) {
+        open override func onExit(stack: inout SwiftTrace.ExitStack,
+                                  invocation: SwiftTrace.Swizzle.Invocation) {
             callerTotals[invocation.returnAddress, default: 0] += invocation.elapsed
             callerCounts[invocation.returnAddress, default: 0] += 1
             super.onExit(stack: &stack, invocation: invocation)
         }
+    }
+}
+
+extension Dl_info: CustomDebugStringConvertible {
+    public var debugDescription: String {
+        String(format: "0x%llx %@", uintptr_t(bitPattern: dli_saddr),
+               SwiftMeta.demangle(symbol: dli_sname) ?? String(cString: dli_sname))
     }
 }
 #endif
