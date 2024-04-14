@@ -16,7 +16,7 @@ let package = Package(
         .package(url: "https://github.com/johnno1962/SwiftTrace",
                  .upToNextMinor(from: "8.5.3")),
         .package(url: "https://github.com/johnno1962/SwiftRegex5",
-                 .upToNextMinor(from: "6.0.1")),
+                 .upToNextMinor(from: "6.1.0")),
         .package(url: "https://github.com/johnno1962/DLKit",
                  .upToNextMinor(from: "3.3.1")),
     ],
