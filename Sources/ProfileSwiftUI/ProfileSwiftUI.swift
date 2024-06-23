@@ -5,12 +5,15 @@
 //  Created by John Holdsworth on 28/03/2024.
 //
 
+#if DEBUG || !SWIFT_PACKAGE
 #if canImport(Darwin) // Apple platforms only..
 import Foundation
-import SwiftTrace
 #if SWIFT_PACKAGE
+import SwiftTraceD
 import SwiftRegex
 import DLKitC
+#else
+import SwiftTrace
 #endif
 
 public struct ProfileSwiftUI {
@@ -201,4 +204,5 @@ extension Dl_info: CustomDebugStringConvertible {
                SwiftMeta.demangle(symbol: dli_sname) ?? String(cString: dli_sname))
     }
 }
+#endif
 #endif
