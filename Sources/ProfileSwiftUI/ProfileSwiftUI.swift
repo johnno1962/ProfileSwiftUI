@@ -11,7 +11,7 @@ import Foundation
 #if SWIFT_PACKAGE
 import SwiftTraceD
 import SwiftRegex
-import DLKitC
+import DLKitCD
 #else
 import SwiftTrace
 #endif

@@ -18,7 +18,7 @@ let package = Package(
         .package(url: "https://github.com/johnno1962/SwiftRegex5",
                  .upToNextMajor(from: "6.1.0")),
         .package(url: "https://github.com/johnno1962/DLKit",
-                 .upToNextMajor(from: "3.3.5")),
+                 .upToNextMajor(from: "3.3.7")),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -26,6 +26,6 @@ let package = Package(
         .target(
             name: "ProfileSwiftUI", dependencies: [
                 .product(name: "SwiftTraceD", package: "SwiftTrace"),
-                .product(name: "DLKitC", package: "DLKit"), "SwiftRegex"]),
+                .product(name: "DLKitCD", package: "DLKit"), "SwiftRegex"]),
     ]
 )
